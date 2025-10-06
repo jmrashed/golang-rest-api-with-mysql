@@ -1,0 +1,27 @@
+# Binaries for programs and plugins
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test binary, generated with `go test -c`
+*.test
+
+# Output of the go build command
+*.exe
+*.test
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# IDE-specific files
+.idea/
+.vscode/
+.DS_Store
+
+pre-push-and-release-checklist.md
+push-and-release-instruction.md

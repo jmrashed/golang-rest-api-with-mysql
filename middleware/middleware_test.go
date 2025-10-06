@@ -1,56 +1,296 @@
 package middleware
 
 import (
-	"bytes"
-	"io/ioutil"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"jmrashed/apps/userApp/auth"
+	"jmrashed/apps/userApp/model"
+
 	"github.com/stretchr/testify/assert"
 )
 
-func TestCreateToken(t *testing.T) {
-	var username, id = "john doe", 15
+func TestAuthMiddleware(t *testing.T) {
+	// Create a test user and generate tokens
+	user := model.User{
+		ID:       1,
+		Username: "testuser",
+		Email:    "test@example.com",
+		Roles: []model.Role{
+			{
+				ID:   1,
+				Name: "user",
+				Permissions: []model.Permission{
+					{
+						ID:   1,
+						Name: "read_todos",
+					},
+				},
+			},
+		},
+	}
 
-	//var samplePerson = dbop.Person{Id: 15, UserName: "john doe", Password: "john_pswrd"}
-	token, err := CreateToken(uint64(id), username)
+	authResponse, err := auth.GenerateTokens(user)
 	assert.NoError(t, err)
 
-	if assert.NotEqual(t, token, "") {
-		//assert.Equal(t, err, errors.New("an error occured during the create token"))
-		t.Log("succeed to create token for the user")
+	tests := []struct {
+		name           string
+		authHeader     string
+		expectedStatus int
+	}{
+		{
+			name:           "Valid token",
+			authHeader:     "Bearer " + authResponse.AccessToken,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "Missing authorization header",
+			authHeader:     "",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "Invalid authorization format",
+			authHeader:     "InvalidFormat",
+			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name:           "Invalid token",
+			authHeader:     "Bearer invalid.token.here",
+			expectedStatus: http.StatusUnauthorized,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a test handler
+			testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+
+			// Create middleware
+			middleware := AuthMiddleware(testHandler)
+
+			// Create request
+			req := httptest.NewRequest("GET", "/test", nil)
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+
+			// Create response recorder
+			rr := httptest.NewRecorder()
+
+			// Execute middleware
+			middleware.ServeHTTP(rr, req)
+
+			// Check status code
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+		})
 	}
 }
 
-func TestMiddleWare(t *testing.T) {
-	/* you should run the program first , go run ./operate/operate.go */
-	//log.Fatal(http.ListenAndServe(":8080", nil))
-	// create a new sample http request like ping then check if it able logged in with token or not
-	testFunc := func(w http.ResponseWriter, r *http.Request) {
-		r.Header.Set("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhdXRob3JpemVkIjp0cnVlLCJleHAiOjE2MjkyODc0NDksInVzZXJfaWQiOjUxLCJ1c2VyX25hbWUiOiJwZXJzb24xIn0.4B2IVsenu2swaCHZM4aKV9mGUl-P-hk-5E4EeReYBco")
-		w.Write([]byte("welcome to main test func"))
+func TestRequirePermission(t *testing.T) {
+	// Create test claims with permissions
+	claims := &auth.Claims{
+		UserID:      1,
+		Username:    "testuser",
+		Permissions: []string{"read_todos", "write_todos"},
 	}
-	// get me func --> you will not access to yourself becuase your token is expired
-	req, err := http.NewRequest("GET", "http://localhost:8080/users/me", nil)
-	if err != nil {
-		t.Fatal(err)
+
+	tests := []struct {
+		name               string
+		requiredPermission string
+		userClaims         *auth.Claims
+		expectedStatus     int
+	}{
+		{
+			name:               "User has required permission",
+			requiredPermission: "read_todos",
+			userClaims:         claims,
+			expectedStatus:     http.StatusOK,
+		},
+		{
+			name:               "User lacks required permission",
+			requiredPermission: "delete_todos",
+			userClaims:         claims,
+			expectedStatus:     http.StatusForbidden,
+		},
+		{
+			name:               "No user context",
+			requiredPermission: "read_todos",
+			userClaims:         nil,
+			expectedStatus:     http.StatusUnauthorized,
+		},
 	}
-	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(testFunc)
-	handler.ServeHTTP(rr, req)
-	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code : got %v want %v\n", status, http.StatusOK)
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test handler
+			testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+
+			// Create middleware
+			middleware := RequirePermission(tt.requiredPermission)(testHandler)
+
+			// Create request with context
+			req := httptest.NewRequest("GET", "/test", nil)
+			if tt.userClaims != nil {
+				ctx := context.WithValue(req.Context(), UserContextKey, tt.userClaims)
+				req = req.WithContext(ctx)
+			}
+
+			// Create response recorder
+			rr := httptest.NewRecorder()
+
+			// Execute middleware
+			middleware.ServeHTTP(rr, req)
+
+			// Check status code
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+		})
 	}
-	client := &http.Client{}
-	response, err := client.Do(req)
-	if err != nil {
-		t.Errorf("the http test request failed with err %s\n", err)
-	} else {
-		data, _ := ioutil.ReadAll(response.Body)
-		expected := []byte("you are Unauthorized or your token is expired")
-		if !bytes.Equal(data, expected) {
-			t.Errorf("handler returned unexpected body : got %v want %v", data, expected)
-		}
+}
+
+func TestRequireRole(t *testing.T) {
+	// Create test claims with roles
+	claims := &auth.Claims{
+		UserID:   1,
+		Username: "testuser",
+		Roles:    []string{"user", "moderator"},
 	}
+
+	tests := []struct {
+		name           string
+		requiredRole   string
+		userClaims     *auth.Claims
+		expectedStatus int
+	}{
+		{
+			name:           "User has required role",
+			requiredRole:   "user",
+			userClaims:     claims,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "User lacks required role",
+			requiredRole:   "admin",
+			userClaims:     claims,
+			expectedStatus: http.StatusForbidden,
+		},
+		{
+			name:           "No user context",
+			requiredRole:   "user",
+			userClaims:     nil,
+			expectedStatus: http.StatusUnauthorized,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test handler
+			testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+
+			// Create middleware
+			middleware := RequireRole(tt.requiredRole)(testHandler)
+
+			// Create request with context
+			req := httptest.NewRequest("GET", "/test", nil)
+			if tt.userClaims != nil {
+				ctx := context.WithValue(req.Context(), UserContextKey, tt.userClaims)
+				req = req.WithContext(ctx)
+			}
+
+			// Create response recorder
+			rr := httptest.NewRecorder()
+
+			// Execute middleware
+			middleware.ServeHTTP(rr, req)
+
+			// Check status code
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+		})
+	}
+}
+
+func TestRequireAnyRole(t *testing.T) {
+	// Create test claims with roles
+	claims := &auth.Claims{
+		UserID:   1,
+		Username: "testuser",
+		Roles:    []string{"user"},
+	}
+
+	tests := []struct {
+		name           string
+		requiredRoles  []string
+		userClaims     *auth.Claims
+		expectedStatus int
+	}{
+		{
+			name:           "User has one of required roles",
+			requiredRoles:  []string{"admin", "user"},
+			userClaims:     claims,
+			expectedStatus: http.StatusOK,
+		},
+		{
+			name:           "User lacks all required roles",
+			requiredRoles:  []string{"admin", "moderator"},
+			userClaims:     claims,
+			expectedStatus: http.StatusForbidden,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create test handler
+			testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			})
+
+			// Create middleware
+			middleware := RequireAnyRole(tt.requiredRoles...)(testHandler)
+
+			// Create request with context
+			req := httptest.NewRequest("GET", "/test", nil)
+			if tt.userClaims != nil {
+				ctx := context.WithValue(req.Context(), UserContextKey, tt.userClaims)
+				req = req.WithContext(ctx)
+			}
+
+			// Create response recorder
+			rr := httptest.NewRecorder()
+
+			// Execute middleware
+			middleware.ServeHTTP(rr, req)
+
+			// Check status code
+			assert.Equal(t, tt.expectedStatus, rr.Code)
+		})
+	}
+}
+
+func TestGetUserFromContext(t *testing.T) {
+	claims := &auth.Claims{
+		UserID:   1,
+		Username: "testuser",
+	}
+
+	// Test with valid context
+	req := httptest.NewRequest("GET", "/test", nil)
+	ctx := context.WithValue(req.Context(), UserContextKey, claims)
+	req = req.WithContext(ctx)
+
+	retrievedClaims, ok := GetUserFromContext(req)
+	assert.True(t, ok)
+	assert.Equal(t, claims.UserID, retrievedClaims.UserID)
+	assert.Equal(t, claims.Username, retrievedClaims.Username)
+
+	// Test with empty context
+	req2 := httptest.NewRequest("GET", "/test", nil)
+	_, ok2 := GetUserFromContext(req2)
+	assert.False(t, ok2)
 }

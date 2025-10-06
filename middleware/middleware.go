@@ -2,100 +2,143 @@ package middleware
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"log"
+	"encoding/json"
 	"net/http"
-	"os"
 	"strings"
-	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	"jmrashed/apps/userApp/auth"
+	"jmrashed/apps/userApp/model"
 )
 
-var mySignInKey = "jdnfksdmfksd"
+type contextKey string
 
-//var deletedToken []string
+const (
+	UserContextKey = contextKey("user")
+)
 
-func MiddleWare(next http.Handler) http.Handler {
+// AuthMiddleware validates JWT tokens and sets user context
+func AuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		woutBearer := r.Header.Get("Authorization")
-		if !strings.Contains(woutBearer, "Bearer") {
-			ctx := context.WithValue(r.Context(), "props", jwt.MapClaims{"user_name": ""})
-			next.ServeHTTP(w, r.WithContext(ctx))
-		} else {
-			authHeader := strings.Split(r.Header.Get("Authorization"), "Bearer ")
-			fmt.Printf("authheader -> %s and len -> %d\n", authHeader, len(authHeader))
-			if len(authHeader) != 2 || authHeader[0] == "null" {
-				//fmt.Println("Malformed token")
-				w.WriteHeader(http.StatusUnauthorized)
-				w.Write([]byte("Malformed Token"))
-				log.Fatal("Malformed token")
-			} else {
-				jwtToken := authHeader[1]
-				token, err := jwt.Parse(jwtToken, func(token *jwt.Token) (interface{}, error) {
-					if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-						return nil, fmt.Errorf("Unexpected signing method: %v", token.Header["alg"])
-					}
-					return []byte(mySignInKey), nil
-				})
-
-				if claims, ok := token.Claims.(jwt.MapClaims); ok && token.Valid {
-					ctx := context.WithValue(r.Context(), "props", claims)
-					// Access context values in handlers like this
-					//props, _ := r.Context().Value("props").(jwt.MapClaims)
-
-					next.ServeHTTP(w, r.WithContext(ctx))
-
-				} else {
-					fmt.Println("token err -> ", err)
-					//r.Header.Set("ExpiredToken", jwtToken)
-					//DelTokenIfExpired(jwtToken)
-					// usernameInter := claims["user_name"]
-					// if username, ok := usernameInter.(fmt.Stringer); ok {
-					// 	person := dbop.GetPersonToDelToken(username.String())
-					// 	dbop.DeleteTokenIfExpired(person)
-					// }
-
-					w.WriteHeader(http.StatusUnauthorized)
-					w.Write([]byte("you are Unauthorized or your token is expired"))
-				}
-			}
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			writeErrorResponse(w, http.StatusUnauthorized, "Authorization header required")
+			return
 		}
 
+		tokenParts := strings.Split(authHeader, " ")
+		if len(tokenParts) != 2 || tokenParts[0] != "Bearer" {
+			writeErrorResponse(w, http.StatusUnauthorized, "Invalid authorization header format")
+			return
+		}
+
+		claims, err := auth.ValidateAccessToken(tokenParts[1])
+		if err != nil {
+			writeErrorResponse(w, http.StatusUnauthorized, "Invalid or expired token")
+			return
+		}
+
+		// Set user context
+		ctx := context.WithValue(r.Context(), UserContextKey, claims)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// func DelTokenIfExpired(token string) []string {
-// 	deletedToken = append(deletedToken, token)
-// 	return deletedToken
-// }
+// RequirePermission middleware checks if user has required permission
+func RequirePermission(permission string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := r.Context().Value(UserContextKey).(*auth.Claims)
+			if !ok {
+				writeErrorResponse(w, http.StatusUnauthorized, "User context not found")
+				return
+			}
 
-func CreateToken(userId uint64, name string) (string, error) {
-	var err error
-	//Creating Access Token
-	os.Setenv("ACCESS_SECRET", mySignInKey) //this should be in an env file
-	atClaims := jwt.MapClaims{}
-	atClaims["authorized"] = true
-	atClaims["user_id"] = userId
-	atClaims["user_name"] = name
-	atClaims["exp"] = time.Now().Add(time.Minute * 15).Unix()
-	at := jwt.NewWithClaims(jwt.SigningMethodHS256, atClaims)
-	token, err := at.SignedString([]byte(os.Getenv("ACCESS_SECRET")))
-	if err != nil {
-		return "", errors.New("an error occured during the create token")
+			if !auth.HasPermission(claims.Permissions, permission) {
+				writeErrorResponse(w, http.StatusForbidden, "Insufficient permissions")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
 	}
-	fmt.Println("jwt map --> ", atClaims)
-	return token, nil
 }
 
-// func ParseMapClaims(myMap jwt.MapClaims, tokenStr string) jwt.Claims {
-// 	token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
-// 		return []byte(mySignInKey), nil
-// 	})
-// 	if err != nil {
-// 		log.Fatal("an error occured during the parse jwt ,,,")
-// 	}
-// 	claims := token.Claims.(jwt.MapClaims)
-// 	return claims
-// }
+// RequireRole middleware checks if user has required role
+func RequireRole(role string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := r.Context().Value(UserContextKey).(*auth.Claims)
+			if !ok {
+				writeErrorResponse(w, http.StatusUnauthorized, "User context not found")
+				return
+			}
+
+			if !auth.HasRole(claims.Roles, role) {
+				writeErrorResponse(w, http.StatusForbidden, "Insufficient role")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// RequireAnyRole middleware checks if user has any of the required roles
+func RequireAnyRole(roles ...string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			claims, ok := r.Context().Value(UserContextKey).(*auth.Claims)
+			if !ok {
+				writeErrorResponse(w, http.StatusUnauthorized, "User context not found")
+				return
+			}
+
+			hasRole := false
+			for _, role := range roles {
+				if auth.HasRole(claims.Roles, role) {
+					hasRole = true
+					break
+				}
+			}
+
+			if !hasRole {
+				writeErrorResponse(w, http.StatusForbidden, "Insufficient role")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// GetUserFromContext extracts user claims from request context
+func GetUserFromContext(r *http.Request) (*auth.Claims, bool) {
+	claims, ok := r.Context().Value(UserContextKey).(*auth.Claims)
+	return claims, ok
+}
+
+// CORS middleware
+func CORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// writeErrorResponse writes a JSON error response
+func writeErrorResponse(w http.ResponseWriter, statusCode int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	json.NewEncoder(w).Encode(model.ErrorResponse{
+		Error:   http.StatusText(statusCode),
+		Message: message,
+	})
+}
