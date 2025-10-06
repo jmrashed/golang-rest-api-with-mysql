@@ -3,15 +3,18 @@ package route
 import (
 	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"jmrashed/apps/userApp/database"
 	"jmrashed/apps/userApp/handlers"
 	"jmrashed/apps/userApp/middleware"
 	"jmrashed/apps/userApp/repository"
+	"jmrashed/apps/userApp/seeder"
 	"jmrashed/apps/userApp/service"
 
 	"github.com/gorilla/mux"
+	"github.com/swaggo/http-swagger"
 	"golang.org/x/time/rate"
 )
 
@@ -28,6 +31,12 @@ func SetupRoutes() {
 	// Initialize schema
 	if err := db.InitializeSchema(); err != nil {
 		log.Printf("Warning: Failed to initialize schema: %v", err)
+	}
+
+	// Run seeder
+	seederInstance := seeder.NewSeeder(db.DB)
+	if err := seederInstance.Run(); err != nil {
+		log.Printf("Warning: Failed to run seeder: %v", err)
 	}
 
 	// Initialize repositories
@@ -58,10 +67,22 @@ func SetupRoutes() {
 	// Static files with caching
 	staticRouter := router.PathPrefix("/static/").Subrouter()
 	staticRouter.Use(middleware.CacheMiddleware(cache))
-	staticRouter.Handler("/", http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
+	staticRouter.PathPrefix("/").Handler(http.StripPrefix("/static/", http.FileServer(http.Dir("./static/"))))
 
 	// Health check
 	router.HandleFunc("/health", healthHandler.HealthCheck).Methods("GET")
+
+	// Serve swagger.yaml file (must be before Swagger UI route)
+	router.HandleFunc("/docs/swagger.yaml", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/yaml")
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		http.ServeFile(w, r, "docs/swagger.yaml")
+	}).Methods("GET")
+
+	// Swagger UI
+	router.PathPrefix("/docs/").Handler(httpSwagger.Handler(
+		httpSwagger.URL("/static/swagger.yaml"),
+	))
 
 	// API routes
 	api := router.PathPrefix("/api/v1").Subrouter()
@@ -111,7 +132,11 @@ func SetupRoutes() {
 	// Add moderator-specific routes here
 
 	// Start server
-	log.Println("Server starting on :8080")
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Printf("Server starting on :%s", port)
 	log.Println("Features enabled: Authentication, Authorization, Rate Limiting, Caching, Logging")
-	log.Fatal(http.ListenAndServe(":8080", router))
+	log.Fatal(http.ListenAndServe(":"+port, router))
 }

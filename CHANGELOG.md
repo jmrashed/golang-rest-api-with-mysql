@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2025-10-06
+
+### Added
+- Database seeder for initial data population
+- Automatic seeding of roles, permissions, and admin user
+- Swagger UI integration for interactive API documentation
+- Environment variable loading with godotenv
+- Enhanced database connection handling for empty passwords
+- Static file serving for Swagger documentation
+- Default admin user (username: admin, password: admin123)
+
+### Fixed
+- Database connection issues with empty password configuration
+- Duplicate User struct declaration in model package
+- Unused import statements causing compilation errors
+- Swagger UI file serving and routing conflicts
+- Environment variable handling for empty values
+
+### Changed
+- Improved database configuration with automatic database creation
+- Enhanced error handling in database connection
+- Updated Swagger documentation with correct server URLs
+- Consolidated model definitions in single file
+
+### Technical
+- Added seeder package for database initialization
+- Integrated Swagger UI with http-swagger package
+- Enhanced route configuration with documentation endpoints
+- Improved environment variable parsing logic
+
 ## [1.1.0] - 2025-10-06
 
 ### Added

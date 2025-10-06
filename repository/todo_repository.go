@@ -3,7 +3,6 @@ package repository
 import (
 	"database/sql"
 	"fmt"
-	"strings"
 
 	"jmrashed/apps/userApp/model"
 )

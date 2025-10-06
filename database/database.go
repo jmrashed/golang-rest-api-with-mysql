@@ -24,10 +24,43 @@ type Config struct {
 
 // NewConnection creates a new database connection
 func NewConnection(config Config) (*DB, error) {
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&multiStatements=true",
-		config.User, config.Password, config.Host, config.Port, config.DBName)
+	// First connect without database to create it if needed
+	var dsn string
+	if config.Password == "" {
+		dsn = fmt.Sprintf("%s@tcp(%s:%s)/?parseTime=true&multiStatements=true",
+			config.User, config.Host, config.Port)
+	} else {
+		dsn = fmt.Sprintf("%s:%s@tcp(%s:%s)/?parseTime=true&multiStatements=true",
+			config.User, config.Password, config.Host, config.Port)
+	}
 
+	log.Printf("Connecting to MySQL with DSN: %s", dsn)
 	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	if err := db.Ping(); err != nil {
+		return nil, fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	// Create database if it doesn't exist
+	_, err = db.Exec(fmt.Sprintf("CREATE DATABASE IF NOT EXISTS %s", config.DBName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create database: %w", err)
+	}
+	db.Close()
+
+	// Now connect to the specific database
+	if config.Password == "" {
+		dsn = fmt.Sprintf("%s@tcp(%s:%s)/%s?parseTime=true&multiStatements=true",
+			config.User, config.Host, config.Port, config.DBName)
+	} else {
+		dsn = fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&multiStatements=true",
+			config.User, config.Password, config.Host, config.Port, config.DBName)
+	}
+
+	db, err = sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -74,7 +107,8 @@ func GetDefaultConfig() Config {
 }
 
 func getEnv(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
+	value, exists := os.LookupEnv(key)
+	if exists {
 		return value
 	}
 	return defaultValue

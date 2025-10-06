@@ -146,7 +146,7 @@ func (s *AuthService) RefreshToken(req model.RefreshTokenRequest) (*model.AuthRe
 	}
 
 	// Validate refresh token
-	claims, err := auth.ValidateRefreshToken(req.RefreshToken)
+	_, err := auth.ValidateRefreshToken(req.RefreshToken)
 	if err != nil {
 		return nil, errors.New("invalid refresh token")
 	}
