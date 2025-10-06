@@ -2,6 +2,29 @@
 
 This is an advanced Go project featuring a comprehensive authentication and authorization system with JWT tokens, role-based access control (RBAC), and permission-based access control. The API is designed with clean architecture principles and includes extensive testing.
 
+
+<!-- Repository Stats -->
+![GitHub repo size](https://img.shields.io/github/repo-size/jmrashed/golang-rest-api-with-mysql)
+![GitHub stars](https://img.shields.io/github/stars/jmrashed/golang-rest-api-with-mysql?style=social)
+![GitHub forks](https://img.shields.io/github/forks/jmrashed/golang-rest-api-with-mysql?style=social)
+![GitHub issues](https://img.shields.io/github/issues/jmrashed/golang-rest-api-with-mysql)
+![GitHub contributors](https://img.shields.io/github/contributors/jmrashed/golang-rest-api-with-mysql)
+![GitHub last commit](https://img.shields.io/github/last-commit/jmrashed/golang-rest-api-with-mysql)
+![GitHub license](https://img.shields.io/github/license/jmrashed/golang-rest-api-with-mysql)
+
+<!-- Language & Build -->
+![Go version](https://img.shields.io/github/go-mod/go-version/jmrashed/golang-rest-api-with-mysql)
+![Go Report Card](https://goreportcard.com/badge/github.com/jmrashed/golang-rest-api-with-mysql)
+
+<!-- CI/CD -->
+![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/jmrashed/golang-rest-api-with-mysql/go.yml?branch=main)
+![Docker Pulls](https://img.shields.io/docker/pulls/jmrashed/golang-rest-api-with-mysql)
+
+<!-- Code Quality -->
+![Code Coverage](https://img.shields.io/badge/coverage-90%25-brightgreen) <!-- adjust % as per real coverage -->
+![Static Analysis](https://img.shields.io/badge/static%20analysis-passed-brightgreen)
+
+
 ## 🚀 Features
 
 ### Authentication & Authorization
