@@ -7,6 +7,9 @@ on:
     branches: [ main ]
 
 jobs:
+  # -------------------------------
+  # 1️⃣ TEST JOB
+  # -------------------------------
   test:
     runs-on: ubuntu-latest
     
@@ -18,33 +21,62 @@ jobs:
           MYSQL_DATABASE: goblog_test
         ports:
           - 3306:3306
-        options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
 
     steps:
-    - uses: actions/checkout@v3
+    # -----------------
+    # Step 1: Checkout code
+    # -----------------
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v3
+    # -----------------
+    # Step 2: Setup Go
+    # -----------------
+    - name: Setup Go environment
+      uses: actions/setup-go@v5
       with:
-        go-version: 1.19
+        go-version: '1.23' # Use the latest stable version
 
+    # -----------------
+    # Step 3: Cache dependencies
+    # -----------------
     - name: Cache Go modules
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: ~/go/pkg/mod
         key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
         restore-keys: |
           ${{ runner.os }}-go-
 
+    # -----------------
+    # Step 4: Install dependencies
+    # -----------------
     - name: Install dependencies
-      run: go mod download
+      run: go mod tidy
 
+    # -----------------
+    # Step 5: Wait for MySQL service
+    # -----------------
     - name: Wait for MySQL
       run: |
-        while ! mysqladmin ping -h"127.0.0.1" -P3306 -uroot -ppassword --silent; do
-          sleep 1
+        echo "Waiting for MySQL to be ready..."
+        for i in {1..30}; do
+          if mysqladmin ping -h"127.0.0.1" -P3306 -uroot -ppassword --silent; then
+            echo "MySQL is ready!"
+            break
+          fi
+          echo "Waiting for MySQL ($i)..."
+          sleep 2
         done
 
+    # -----------------
+    # Step 6: Run tests with coverage
+    # -----------------
     - name: Run tests
       env:
         DB_HOST: 127.0.0.1
@@ -56,41 +88,55 @@ jobs:
         REFRESH_SECRET: test-refresh-secret
       run: |
         go test -v -race -coverprofile=coverage.out ./...
-        go tool cover -html=coverage.out -o coverage.html
+        go tool cover -func=coverage.out
 
+    # -----------------
+    # Step 7: Upload coverage report to Codecov (optional)
+    # -----------------
     - name: Upload coverage reports
-      uses: codecov/codecov-action@v3
+      if: always()
+      uses: codecov/codecov-action@v4
       with:
         file: ./coverage.out
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: false
 
+  # -------------------------------
+  # 2️⃣ BUILD JOB
+  # -------------------------------
   build:
     needs: test
     runs-on: ubuntu-latest
-    
+
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
-    - name: Set up Go
-      uses: actions/setup-go@v3
+    - name: Setup Go
+      uses: actions/setup-go@v5
       with:
-        go-version: 1.19
+        go-version: '1.23'
 
-    - name: Build application
+    - name: Build application binary
       run: |
-        CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
+        mkdir -p build
+        CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o build/main .
 
     - name: Build Docker image
       run: |
         docker build -t golang-rest-api:${{ github.sha }} .
 
+  # -------------------------------
+  # 3️⃣ DEPLOY JOB (placeholder)
+  # -------------------------------
   deploy:
     needs: [test, build]
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    
+
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Deploy to staging
       run: |
-        echo "Deploying to staging environment"
+        echo "✅ Build and tests passed."
+        echo "🚀 Deployment step is currently disabled (CI only)."
